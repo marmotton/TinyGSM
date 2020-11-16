@@ -8,17 +8,27 @@ These are just notes used while writing the SIM7000 SSL version. This file shoul
 
 ```
 at+cnact=1,"dr.m2m.ch"
+OK
+
++APP PDP: ACTIVE
 at+cnact?
++CNACT: 1,"10.133.65.46"
+
+OK
 ```
 
 ### Connecting with TCP and SSL
 
 ```
 at+cacid=0
+OK
 at+csslcfg="sslversion",0,3
+OK
 at+casslcfg=0,"ssl",1
+OK
 at+casslcfg=0,cacert,"dstrootx3.crt" <-- Optional, certificate must be uploaded beforehand
 at+caopen=0,"eende.net",443
++CAOPEN: 0,0
 ```
 
 ### Getting the file
@@ -35,8 +45,12 @@ GET /test.txt HTTP/1.0
 Host: eende.net
 Connection: keep-alive
 
+OK
+
++CASEND: 0,0,71
 
 +CADATAIND: 0 <-- Means that data is available
+
 AT+CARECV=0,1024 <-- This command must be sent before +CASTATE:0,0 is shown (i.e. before the server closes the connection)
 AT+CACLOSE=0
 ```
