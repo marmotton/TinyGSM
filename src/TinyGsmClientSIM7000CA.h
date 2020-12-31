@@ -504,8 +504,8 @@ class TinyGsmSim7000CA : public TinyGsmModem<TinyGsmSim7000CA>,
     return status_code == 0 ? nbytes_sent : 0;
   }
 
-  // TODO: find out why this method is not called by the HTTP example
   size_t modemRead(size_t size, uint8_t mux) {
+    DBG("### Trying to read data");
     if (!sockets[mux]) return 0;
 
     sendAT(GF("+CARECV="), mux, ',', (uint16_t)size);
@@ -525,6 +525,7 @@ class TinyGsmSim7000CA : public TinyGsmModem<TinyGsmSim7000CA>,
       sockets[mux]->rx.put(c);
     }
 
+    // TODO: should sock_available be set to 0 here ?
     sockets[mux]->sock_available = len_confirmed;
     waitResponse();
     return len_confirmed;
@@ -597,18 +598,17 @@ class TinyGsmSim7000CA : public TinyGsmModem<TinyGsmSim7000CA>,
         } else if (r5 && data.endsWith(r5)) {
           index = 5;
           goto finish;
-        } else if (data.endsWith(GF(GSM_NL "+CIPRXGET:"))) {
-          int8_t mode = streamGetIntBefore(',');
-          if (mode == 1) {
-            int8_t mux = streamGetIntBefore('\n');
-            if (mux >= 0 && mux < TINY_GSM_MUX_COUNT && sockets[mux]) {
-              sockets[mux]->got_data = true;
-            }
-            data = "";
-            // DBG("### Got Data:", mux);
-          } else {
-            data += mode;
+        } else if (data.endsWith(GF(GSM_NL "+CADATAIND:"))) {
+          int8_t mux = streamGetIntBefore('\n');
+          if (mux >= 0 && mux < TINY_GSM_MUX_COUNT && sockets[mux]) {
+            sockets[mux]->got_data = true;
+            // We have no way of knowing how much data actually came in, so
+            // we set the value to 1024, the maximum possible size.
+            // TODO: check if 1024 is really the max value
+            sockets[mux]->sock_available = 1024;
           }
+          data = "";
+          DBG("### Got Data:", mux);
         } else if (data.endsWith(GF(GSM_NL "+RECEIVE:"))) {
           int8_t  mux = streamGetIntBefore(',');
           int16_t len = streamGetIntBefore('\n');
