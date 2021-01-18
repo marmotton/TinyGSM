@@ -12,9 +12,14 @@
 // #define TINY_GSM_DEBUG Serial
 
 #define TINY_GSM_MUX_COUNT 2
-//#define TINY_GSM_BUFFER_READ_AND_CHECK_SIZE
-#define TINY_GSM_BUFFER_READ_NO_CHECK
+#define TINY_GSM_BUFFER_READ_AND_CHECK_SIZE
+//#define TINY_GSM_BUFFER_READ_NO_CHECK
 //#define TINY_GSM_NO_MODEM_BUFFER
+
+// TODO: find a better solution
+// TINY_GSM_BUFFER_READ_NO_CHECK works but very slowly as each call to
+// at->maintain() will result in a 100ms delay
+#define TINY_GSM_BUFFER_MAINTAIN_DISABLE_UPDATE_SOCK_AVAILABLE
 
 #include "TinyGsmBattery.tpp"
 #include "TinyGsmGPRS.tpp"
@@ -504,9 +509,7 @@ class TinyGsmSim7000CA : public TinyGsmModem<TinyGsmSim7000CA>,
     return status_code == 0 ? nbytes_sent : 0;
   }
 
-  // TODO: explain what happens here...
   size_t modemRead(size_t size, uint8_t mux) {
-    DBG("### Trying to read data");
     if (!sockets[mux]) return 0;
 
     sendAT(GF("+CARECV="), mux, ',', (uint16_t)size);
@@ -515,13 +518,18 @@ class TinyGsmSim7000CA : public TinyGsmModem<TinyGsmSim7000CA>,
       sockets[mux]->sock_available = 0;
       return 0;
     }
+
+    // This is the real number of available bytes
     int16_t len_confirmed = streamGetIntBefore(',');
 
+    // sock_available was set to the max value (1024), update it now that we know the real value
     sockets[mux]->sock_available = len_confirmed;
 
     for (int i = 0; i < len_confirmed; i++) {
+      // Read one byte
       moveCharFromStreamToFifo(mux);
 
+      // Update the sock_available value
       sockets[mux]->sock_available--;
     }
 
@@ -535,15 +543,36 @@ class TinyGsmSim7000CA : public TinyGsmModem<TinyGsmSim7000CA>,
     return 0;
   }
 
-  // TODO: update this method
+  // TODO: Test this method. Is it used at all ?
   bool modemGetConnected(uint8_t mux) {
-    sendAT(GF("+CIPSTATUS="), mux);
-    waitResponse(GF("+CIPSTATUS"));
-    int8_t res = waitResponse(GF(",\"CONNECTED\""), GF(",\"CLOSED\""),
-                              GF(",\"CLOSING\""), GF(",\"REMOTE CLOSING\""),
-                              GF(",\"INITIAL\""));
-    waitResponse();
-    return 1 == res;
+    bool mux_is_open = false;
+
+    sendAT(GF("+CAOPEN?"));
+
+    // Check for mux 0, mux 1 and finally OK
+    //       Not connected: OK
+    //
+    //       Connected: +CAOPEN: 0,"vsh.pp.ua",443
+    //                  +CAOPEN: 1,"vsh.pp.ua",80
+    //                  OK
+    for (int i = 0; i < 3; i++) {
+      int8_t res = waitResponse(GF("OK"), GF("+CAOPEN:"));
+
+      if (res == 1) {  // Reached OK
+        break;
+      }
+
+      if (res == 2) {  // +CAOPEN... response
+        uint8_t mux_open = streamGetIntBefore(',');
+        streamSkipUntil('\n');
+
+        if (mux_open == mux) {
+          mux_is_open = true;
+        }
+      }
+    }
+
+    return mux_is_open;
   }
 
   /*
@@ -603,29 +632,10 @@ class TinyGsmSim7000CA : public TinyGsmModem<TinyGsmSim7000CA>,
             sockets[mux]->got_data = true;
             // We have no way of knowing how much data actually came in, so
             // we set the value to 1024, the maximum possible size.
-            // TODO: check if 1024 is really the max value
             sockets[mux]->sock_available = 1024;
           }
           data = "";
           DBG("### Got Data:", mux);
-        } else if (data.endsWith(GF(GSM_NL "+RECEIVE:"))) {
-          int8_t  mux = streamGetIntBefore(',');
-          int16_t len = streamGetIntBefore('\n');
-          if (mux >= 0 && mux < TINY_GSM_MUX_COUNT && sockets[mux]) {
-            sockets[mux]->got_data = true;
-            if (len >= 0 && len <= 1024) { sockets[mux]->sock_available = len; }
-          }
-          data = "";
-          // DBG("### Got Data:", len, "on", mux);
-        } else if (data.endsWith(GF("CLOSED" GSM_NL))) {
-          int8_t nl   = data.lastIndexOf(GSM_NL, data.length() - 8);
-          int8_t coma = data.indexOf(',', nl + 2);
-          int8_t mux  = data.substring(nl + 2, coma).toInt();
-          if (mux >= 0 && mux < TINY_GSM_MUX_COUNT && sockets[mux]) {
-            sockets[mux]->sock_connected = false;
-          }
-          data = "";
-          DBG("### Closed: ", mux);
         } else if (data.endsWith(GF("*PSNWID:"))) {
           streamSkipUntil('\n');  // Refresh network name by network
           data = "";

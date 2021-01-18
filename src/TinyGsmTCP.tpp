@@ -309,7 +309,10 @@ class TinyGsmTCP {
       GsmClient* sock = thisModem().sockets[mux];
       if (sock && sock->got_data) {
         sock->got_data       = false;
+        // TODO: find a cleaner solution maybe ?
+        #ifndef TINY_GSM_BUFFER_MAINTAIN_DISABLE_UPDATE_SOCK_AVAILABLE
         sock->sock_available = thisModem().modemGetAvailable(mux);
+        #endif
       }
     }
     while (thisModem().stream.available()) {
