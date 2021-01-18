@@ -504,30 +504,29 @@ class TinyGsmSim7000CA : public TinyGsmModem<TinyGsmSim7000CA>,
     return status_code == 0 ? nbytes_sent : 0;
   }
 
+  // TODO: explain what happens here...
   size_t modemRead(size_t size, uint8_t mux) {
     DBG("### Trying to read data");
     if (!sockets[mux]) return 0;
 
     sendAT(GF("+CARECV="), mux, ',', (uint16_t)size);
 
-    if (waitResponse(GF("+CARECV:")) != 1) { return 0; }
+    if (waitResponse(GF("+CARECV:")) != 1) {
+      sockets[mux]->sock_available = 0;
+      return 0;
+    }
     int16_t len_confirmed = streamGetIntBefore(',');
 
+    sockets[mux]->sock_available = len_confirmed;
+
     for (int i = 0; i < len_confirmed; i++) {
-      uint32_t startMillis = millis();
+      moveCharFromStreamToFifo(mux);
 
-      while (!stream.available() &&
-             (millis() - startMillis < sockets[mux]->_timeout)) {
-        TINY_GSM_YIELD();
-      }
-      char c = stream.read();
-
-      sockets[mux]->rx.put(c);
+      sockets[mux]->sock_available--;
     }
 
-    // TODO: should sock_available be set to 0 here ?
-    sockets[mux]->sock_available = len_confirmed;
     waitResponse();
+
     return len_confirmed;
   }
 
